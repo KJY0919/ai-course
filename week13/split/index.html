@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>나눠 내기</title>
+    <style>
+        :root { --p: #4a90e2; --bg: #f5f7fa; --txt: #333; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--txt); margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .cnt { width: 100%; max-width: 400px; background: #fff; padding: 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: var(--p); }
+        .ig { margin-bottom: 16px; }
+        label { display: block; margin-bottom: 8px; font-weight: bold; font-size: 0.9rem; }
+        input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
+        .rc { background: #eef6ff; padding: 16px; border-radius: 12px; text-align: center; margin: 20px 0; }
+        .rv { font-size: 1.8rem; font-weight: bold; color: var(--p); }
+        .us { margin-top: 24px; border-top: 1px solid #ddd; padding-top: 20px; }
+        .cfu { display: block; text-align: center; background: var(--p); color: #fff; padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        input[type="file"] { display: none; }
+        #st { text-align: center; font-size: 0.9rem; margin: 10px 0; min-height: 1.2em; }
+        .loading { color: var(--p); } .error { color: #e74c3c; } .success { color: #2ecc71; }
+        .il { list-style: none; padding: 0; margin-top: 16px; }
+        .il li { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+    </style>
+</head>
+<body>
+<div class="cnt">
+    <h1>💸 나눠 내기</h1>
+    <div class="ig"><label>총 금액 (₩)</label><input type="number" id="ta" placeholder="0" inputmode="numeric"></div>
+    <div class="ig"><label>인원 수 (명)</label><input type="number" id="pc" value="1" min="1" inputmode="numeric"></div>
+    <div class="rc"><div style="font-size:0.8rem; color:#666;">1인당 금액</div><div class="rv" id="pp">0원</div></div>
+    <div class="us">
+        <label>영수증 스캔 (AI)</label>
+        <label for="rf" class="cfu">📷 사진 올리기</label>
+        <input type="file" id="rf" accept="image/*">
+        <div id="st"></div>
+        <ul id="it" class="il"></ul>
+    </div>
+</div>
+<script>
+    async function ask(prompt, imageUrl) {
+      const content = [{ type: "text", text: prompt }];
+      if (imageUrl) content.push({ type: "image_url", image_url: { url: imageUrl } });
+      const r = await fetch("https://krchoi.com/gemma4/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "gemma4", messages: [{ role: "user", content: content }] })
+      });
+      const data = await r.json();
+      return data.choices[0].message.content;
+    }
+    function parseJson(text) {
+      const m = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+      try { return JSON.parse(m ? m[1] : text); } catch (e) { return null; }
+    }
+    function shrinkImage(file, maxSize = 1280) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", 0.85));
+        };
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+    }
+    const ta = document.getElementById('ta'), pc = document.getElementById('pc'), pp = document.getElementById('pp'), rf = document.getElementById('rf'), st = document.getElementById('st'), it = document.getElementById('it');
+    function calc() {
+        const t = parseInt(ta.value) || 0, p = parseInt(pc.value) || 1;
+        pp.textContent = Math.floor(t / (p > 0 ? p : 1)).toLocaleString() + '원';
+    }
+    ta.oninput = calc; pc.oninput = calc;
+    rf.onchange = async (e) => {
+        const f = e.target.files[0]; if (!f) return;
+        st.textContent = "읽는 중..."; st.className = "loading"; it.innerHTML = "";
+        try {
+            const img = await shrinkImage(f);
+            const res = await ask("영수증에서 항목과 금액을 추출해 JSON으로 답해줘. 형식: {\"items\": [{\"name\": \"A\", \"price\": 100}], \"total\": 100}. JSON만 답해.", img);
+            const d = parseJson(res);
+            if (d && d.items) {
+                ta.value = d.total || d.items.reduce((a, c) => a + (c.price || 0), 0);
+                calc();
+                d.items.forEach(i => {
+                    const l = document.createElement('li');
+                    l.innerHTML = `<span>${i.name}</span><b>${(i.price || 0).toLocaleString()}원</b>`;
+                    it.appendChild(l);
+                });
+                st.textContent = "완료!"; st.className = "success";
+            } else throw new Error();
+        } catch (err) { st.textContent = "읽지 못했습니다"; st.className = "error"; }
+        finally { rf.value = ""; }
+    };
+</script>
+</body>
+</html>
